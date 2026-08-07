@@ -2,118 +2,72 @@
 
 > Your terminal, in your pocket.
 
-A Telegram bot that acts as a bridge between your phone and AI coding agents running on your machine. Send a message from Telegram — it lands in `kiro-cli` (or any other backend you configure). The response comes straight back to your chat. No SSH clients, no VPNs, no fumbling with terminals on a phone screen.
-
----
-
-## How It Works
+A Telegram bot that bridges your phone to AI coding agents running on your machine. Send a message — it lands in `kiro-cli`. The response comes back to your chat. No SSH clients, no VPNs, no fumbling with terminals on glass.
 
 ```
-You (Telegram) ──► Bot ──► kiro-cli (or other backend) ──► Your machine
-                    ◄──────────────────────────────────────
+You (Telegram) ──► Bot ──► kiro-cli (Rick agent) ──► Your machine
+                    ◄──────────────────────────────────────────────
 ```
-
-1. You send a message to your private Telegram bot
-2. The bridge authenticates you by numeric user ID (nobody else can use it)
-3. Your message is forwarded to the configured AI backend as a subprocess call
-4. The output is cleaned, optionally trimmed, and sent back as a Telegram message
-5. Session state is persisted — context survives restarts
-
-Everything runs as a `systemd` user service. It starts on login, restarts on failure, and logs to journal.
 
 ---
 
 ## Features
 
-- **Multi-backend** — switch between `kiro-cli`, Claude Code, Aider, Anthropic API, OpenAI-compatible endpoints, Ollama, or a custom CLI template
-- **Multi-session** — named sessions with independent context, working directory, and backend per session
-- **Session persistence** — `session_state.json` survives restarts; your conversation context is never lost
-- **File transfer** — upload files from Telegram to your machine; browse and download files back
-- **Inline buttons** — one-tap shortcuts for system status, CPU/RAM, IP address, uptime
-- **Response filtering** — `smart` (auto-trim), `verbose` (full output), or `brief` (first line only)
-- **Auth guard** — single allowed Telegram user ID; everyone else gets rejected instantly
-- **ANSI stripping** — terminal colour codes are cleaned before sending
+- **Multi-backend** — kiro-cli, Claude Code, Aider, Anthropic API, OpenAI-compatible, Ollama, custom CLI
+- **Multi-session** — named sessions with independent context, working dir, and backend
+- **Rick Sanchez agent** — real answers, zero patience, actually useful
+- **9 MCP servers** — filesystem, git, fetch, GitHub, SQLite, Puppeteer, memory, Brave search, sequential thinking
+- **File transfer** — upload files to your machine from Telegram; browse and download back
+- **Session persistence** — context survives restarts via `session_state.json`
+- **Inline buttons** — one-tap shortcuts for system status, CPU, IP, uptime
+- **Single-user auth** — numeric Telegram user ID whitelist, everyone else rejected instantly
+- **Systemd managed** — starts on login, restarts on failure, logs to journal
 
 ---
 
-## Backends
+## Documentation
 
-| Key | What it runs |
+| Doc | Description |
 |---|---|
-| `kiro` | `kiro-cli chat` (default) |
-| `claude_code` | Claude Code CLI (`claude -p`) |
-| `aider` | Aider repo-aware coding agent |
-| `anthropic_api` | Direct Anthropic API (no CLI needed) |
-| `openai` | OpenAI or any OpenAI-compatible endpoint |
-| `ollama` | Local Ollama models |
-| `custom` | Any CLI via `CUSTOM_CMD_TEMPLATE` in `.env` |
-
-Switch backends per-session with `/backend` in the bot.
+| [Architecture](docs/architecture.md) | How all the pieces connect, file layout, request lifecycle |
+| [Setup](docs/setup.md) | Full installation guide from scratch |
+| [Configuration](docs/configuration.md) | Every `.env` variable explained |
+| [MCP Servers](docs/mcp-servers.md) | All 9 MCP servers — what they do and how to configure them |
+| [Agents](docs/agents.md) | Rick agent, built-in agents, creating your own |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 
 ---
 
-## Project Layout
-
-```
-~/kiro-telegram-bridge/      # engine — code and venv
-    main.py
-    .venv/
-
-~/obsidian_control/          # your customisations
-    .env                     # credentials and config
-    session_state.json       # persisted session state
-    bridge.log               # runtime logs
-```
-
----
-
-## Setup
-
-### 1. Clone and install
+## Quick Start
 
 ```bash
+# 1. Clone
 git clone https://github.com/Nehemiahnganjo/obsidian-control.git ~/kiro-telegram-bridge
 cd ~/kiro-telegram-bridge
+
+# 2. Python deps
 python3 -m venv .venv
 .venv/bin/pip install "python-telegram-bot==21.11.1" "python-dotenv==1.0.1" "requests==2.32.3"
-```
 
-### 2. Configure
-
-```bash
+# 3. Config
 mkdir -p ~/obsidian_control
-cp ~/kiro-telegram-bridge/.env.example ~/obsidian_control/.env
-nano ~/obsidian_control/.env
-```
+cp .env.example ~/obsidian_control/.env
+chmod 600 ~/obsidian_control/.env
+nano ~/obsidian_control/.env   # set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_ID
 
-Minimum required:
+# 4. Agent
+mkdir -p ~/.kiro/agents && cp rick.json ~/.kiro/agents/rick.json
 
-```env
-TELEGRAM_BOT_TOKEN=your_token_from_botfather
-TELEGRAM_ALLOWED_USER_ID=your_numeric_telegram_id
-BRIDGE_DIR=/home/youruser/obsidian_control
-KIRO_WORKDIR=/home/youruser
-```
+# 5. MCP servers
+mkdir -p ~/.kiro/settings && cp mcp.json ~/.kiro/settings/mcp.json
 
-Get your bot token from [@BotFather](https://t.me/BotFather).  
-Get your user ID from [@userinfobot](https://t.me/userinfobot).
-
-### 3. Systemd service
-
-```bash
-mkdir -p ~/.config/systemd/user
+# 6. Service
 cp kiro-bridge.service ~/.config/systemd/user/
-# edit the paths inside if needed
 systemctl --user daemon-reload
 systemctl --user enable --now kiro-bridge.service
 ```
 
-### 4. Verify
-
-```bash
-systemctl --user status kiro-bridge.service
-journalctl --user -u kiro-bridge.service -f
-```
+Full guide: [docs/setup.md](docs/setup.md)
 
 ---
 
@@ -121,54 +75,49 @@ journalctl --user -u kiro-bridge.service -f
 
 | Command | Description |
 |---|---|
-| `/start` | Show menu with quick-action buttons |
-| `/status` | Current session info, backend, working dir |
+| `/start` | Menu with quick-action buttons |
+| `/status` | Current session, backend, working dir |
 | `/new <name> [backend] [cwd]` | Create or switch to a named session |
-| `/backend [name]` | Switch backend for current session |
+| `/backend [name]` | Switch AI backend for current session |
 | `/files` | Browse and download files in working dir |
-| _(any text)_ | Forwarded to the active AI backend |
-| _(file upload)_ | Saves file to working dir |
+| _(any text)_ | Sent to the active AI backend |
+| _(file upload)_ | Saved to working directory |
 
 ---
 
-## Environment Variables
+## Backends
 
-```env
-# Required
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USER_ID=
+| Key | What runs |
+|---|---|
+| `kiro` | kiro-cli (default) |
+| `claude_code` | Claude Code CLI |
+| `aider` | Aider coding agent |
+| `anthropic_api` | Direct Anthropic API |
+| `openai` | OpenAI or compatible endpoint |
+| `ollama` | Local Ollama models |
+| `custom` | Any CLI via `CUSTOM_CMD_TEMPLATE` |
 
-# Paths
-KIRO_WORKDIR=/home/void
-BRIDGE_DIR=/home/void/obsidian_control
+---
 
-# Backend
-AGENT_BACKEND=kiro
-KIRO_CLI_PATH=/home/void/.local/bin/kiro-cli
+## Project Layout
 
-# Tuning
-AGENT_TIMEOUT=180
-RESPONSE_MODE=smart        # smart | verbose | brief
-MAX_FILE_SIZE=20971520     # 20MB
-
-# Optional API keys
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-OPENAI_BASE_URL=https://api.openai.com/v1
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.1
 ```
+~/kiro-telegram-bridge/    ← engine (this repo)
+    main.py                ← bridge logic
+    rick.json              ← Rick agent definition
+    mcp.json               ← MCP server config template
+    kiro-bridge.service    ← systemd service template
+    .env.example           ← config template
+    docs/                  ← full documentation
 
----
+~/obsidian_control/        ← your config (NOT in git)
+    .env                   ← credentials and settings
+    session_state.json     ← persisted session state
+    bridge.log             ← runtime logs
+    data.db                ← SQLite database
 
-## Logs
-
-```bash
-# Live journal
-journalctl --user -u kiro-bridge.service -f
-
-# File log
-tail -f ~/obsidian_control/bridge.log
+~/.kiro/agents/rick.json   ← active agent (global kiro config)
+~/.kiro/settings/mcp.json  ← active MCP config (global kiro config)
 ```
 
 ---
@@ -176,11 +125,12 @@ tail -f ~/obsidian_control/bridge.log
 ## Requirements
 
 - Python 3.10+
+- Node.js + npm (MCP servers)
+- `uv` / `uvx` (Python MCP servers)
 - `python-telegram-bot==21.11.1`
-- `requests`
-- `python-dotenv`
+- `requests`, `python-dotenv`
+- kiro-cli
 - A Telegram bot token
-- At least one AI backend (e.g. `kiro-cli`)
 
 ---
 
