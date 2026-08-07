@@ -1,0 +1,17 @@
+[Unit]
+Description=Kiro Telegram Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/youruser/kiro-telegram-bridge
+EnvironmentFile=/home/youruser/obsidian_control/.env
+ExecStart=/home/youruser/kiro-telegram-bridge/.venv/bin/python3 /home/youruser/kiro-telegram-bridge/main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
