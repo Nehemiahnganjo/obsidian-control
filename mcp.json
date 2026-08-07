@@ -7,7 +7,7 @@
     },
     "git": {
       "command": "uvx",
-      "args": ["mcp-server-git==0.6.2", "--repository", "/home/void/kiro-telegram-bridge"],
+      "args": ["--with", "mcp==1.0.0", "mcp-server-git==0.6.2", "--repository", "/home/void/kiro-telegram-bridge"],
       "description": "Git operations: log, diff, commit, status"
     },
     "fetch": {
@@ -25,7 +25,7 @@
     },
     "sqlite": {
       "command": "uvx",
-      "args": ["mcp-server-sqlite==0.6.2", "--db-path", "/home/void/obsidian_control/data.db"],
+      "args": ["--with", "mcp==1.0.0", "mcp-server-sqlite==0.6.2", "--db-path", "/home/void/obsidian_control/data.db"],
       "description": "Query SQLite databases"
     },
     "brave-search": {
