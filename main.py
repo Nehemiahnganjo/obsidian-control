@@ -136,11 +136,13 @@ class KiroBackend(AgentBackend):
     name = "kiro"
 
     async def send(self, message, session):
+        agent = os.getenv("KIRO_AGENT", "rick")
         cmd = [
             KIRO_CLI_PATH, "chat",
             "--no-interactive",
             "--trust-all-tools",
             "--wrap", "never",
+            "--agent", agent,
             "--resume-id", session.session_id,
             message,
         ]
