@@ -7,12 +7,12 @@
     },
     "git": {
       "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "/home/void"],
+      "args": ["mcp-server-git==0.6.2", "--repository", "/home/void/kiro-telegram-bridge"],
       "description": "Git operations: log, diff, commit, status"
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"],
+      "args": ["--with", "mcp==1.1.0", "mcp-server-fetch"],
       "description": "Fetch any URL, scrape web pages"
     },
     "github": {
@@ -25,16 +25,16 @@
     },
     "sqlite": {
       "command": "uvx",
-      "args": ["mcp-server-sqlite", "--db-path", "/home/void/obsidian_control/data.db"],
+      "args": ["mcp-server-sqlite==0.6.2", "--db-path", "/home/void/obsidian_control/data.db"],
       "description": "Query SQLite databases"
     },
     "brave-search": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-brave-search"],
       "env": {
-        "BRAVE_API_KEY": ""
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
       },
-      "description": "Web search via Brave — add BRAVE_API_KEY to enable"
+      "description": "Web search via Brave — add BRAVE_API_KEY to .env to enable"
     },
     "puppeteer": {
       "command": "npx",
