@@ -1,8 +1,8 @@
 # Documentation Index
 
-Complete guide to obsidian-control: Telegram-to-AI bridge with multi-backend support and fine-tuning capabilities.
+Complete guide to obsidian-control: Telegram-to-AI bridge with multi-backend support.
 
-## Core Documentation
+## Documentation
 
 | Document | Purpose |
 |----------|---------|
@@ -13,16 +13,6 @@ Complete guide to obsidian-control: Telegram-to-AI bridge with multi-backend sup
 | **[Agents](agents.md)** | Rick agent, creating custom personas, behavior tuning |
 | **[Troubleshooting](troubleshooting.md)** | Common issues, error messages, debugging tips |
 
-## Fine-Tuning Pipeline
-
-Train custom models locally with LoRA fine-tuning on CPU:
-
-| Document | Purpose |
-|----------|---------|
-| **[FINETUNING_SETUP.md](../FINETUNING_SETUP.md)** | Quick start (5 minutes) — setup and first training run |
-| **[FINE_TUNING.md](../FINE_TUNING.md)** | Complete technical guide — architecture, performance, monitoring |
-| **[CHECKLIST.md](../CHECKLIST.md)** | Setup verification, troubleshooting, quality expectations |
-
 ## Quick Navigation
 
 ### I want to...
@@ -32,7 +22,6 @@ Train custom models locally with LoRA fine-tuning on CPU:
 - **Configure backends** → [Configuration](configuration.md)
 - **Explore MCP servers** → [MCP Servers](mcp-servers.md)
 - **Customize Rick's personality** → [Agents](agents.md)
-- **Fine-tune a custom model** → [FINETUNING_SETUP.md](../FINETUNING_SETUP.md)
 - **Debug issues** → [Troubleshooting](troubleshooting.md)
 
 ## Key Concepts
@@ -63,9 +52,8 @@ The main agent learns and adapts:
 - Mood/state tracking (contempt, patience, interest)
 - Cross-session semantic memory
 - Preference learning from conversations
-- Fine-tuned offline model support
 
-See: [Agents](agents.md), [FINE_TUNING.md](../FINE_TUNING.md)
+See: [Agents](agents.md)
 
 ### MCP (Model Context Protocol) Integration
 9 powerful servers for extended capabilities:
@@ -96,26 +84,6 @@ See: [MCP Servers](mcp-servers.md)
 
 **Full guide**: [Setup](setup.md)
 
-## Fine-Tuning Flow
-
-```
-1. Run setup script
-   ↓
-2. Collect 50+ conversations
-   ↓
-3. Export training data
-   ↓
-4. Fine-tune (30-60 min)
-   ↓
-5. Test offline model
-   ↓
-6. Enable scheduler (optional)
-   ↓
-7. Continuous improvement
-```
-
-**Full guide**: [FINETUNING_SETUP.md](../FINETUNING_SETUP.md)
-
 ## Architecture Overview
 
 ```
@@ -130,21 +98,33 @@ See: [MCP Servers](mcp-servers.md)
 │  • Backend router                           │
 │  • Command dispatcher                       │
 │  • MCP integrator                           │
-└────────────┬──────────────────┬─────────────┘
-             │                  │
-    ┌────────▼─────────┐  ┌─────▼──────────────┐
-    │ AI Backends      │  │ MCP Servers        │
-    ├─────────────────┤  ├───────────────────┤
-    │ • kiro-cli      │  │ • filesystem      │
-    │ • Claude Code   │  │ • git             │
-    │ • Aider         │  │ • github          │
-    │ • Anthropic API │  │ • sqlite          │
-    │ • OpenAI        │  │ • fetch           │
-    │ • Ollama (local)│  │ • puppeteer       │
-    │ • Custom        │  │ • memory          │
-    └─────────────────┘  │ • brave-search    │
-                         │ • sequential-thinking
-                         └───────────────────┘
+└────────────────┬────────────────────────────┘
+                 │
+    ┌────────────▼─────────────┐
+    │ AI Backends              │
+    ├──────────────────────────┤
+    │ • kiro-cli               │
+    │ • Claude Code            │
+    │ • Aider                  │
+    │ • Anthropic API          │
+    │ • OpenAI                 │
+    │ • Ollama (local)         │
+    │ • Custom                 │
+    └──────────────────────────┘
+                 │
+    ┌────────────▼──────────────────┐
+    │ MCP Servers                   │
+    ├───────────────────────────────┤
+    │ • filesystem                  │
+    │ • git                         │
+    │ • github                      │
+    │ • sqlite                      │
+    │ • fetch                       │
+    │ • puppeteer                   │
+    │ • memory                      │
+    │ • brave-search                │
+    │ • sequential-thinking         │
+    └───────────────────────────────┘
 ```
 
 **Full details**: [Architecture](architecture.md)
@@ -158,11 +138,6 @@ See: [MCP Servers](mcp-servers.md)
 - kiro-cli
 - A Telegram bot token
 
-For fine-tuning:
-- PyTorch (CPU)
-- transformers, peft, datasets
-- 32GB RAM recommended
-
 See: [Setup](setup.md) → Requirements
 
 ## Support & Troubleshooting
@@ -172,14 +147,13 @@ See: [Setup](setup.md) → Requirements
 1. **Bot not responding** → [Troubleshooting](troubleshooting.md) → Bot
 2. **Session not persisting** → [Troubleshooting](troubleshooting.md) → Session
 3. **MCP server errors** → [MCP Servers](mcp-servers.md) → Troubleshooting
-4. **Fine-tuning crashes** → [FINE_TUNING.md](../FINE_TUNING.md) → Troubleshooting
 
 ### Getting Help
 
 1. Check the relevant documentation section
 2. See [Troubleshooting](troubleshooting.md)
 3. Review [Configuration](configuration.md) for setup issues
-4. Check logs: `~obsidian_control/bridge.log`
+4. Check logs: `~/obsidian_control/bridge.log`
 
 ## File Organization
 
@@ -194,30 +168,16 @@ docs/                          ← This directory
 └── troubleshooting.md
 
 ../                            ← Project root
-├── FINE_TUNING.md             ← Technical guide
-├── FINETUNING_SETUP.md        ← Quick start
-├── CHECKLIST.md               ← Verification
-└── main files...
+├── main files...
 ```
-
-## Contributing
-
-To improve documentation:
-1. Edit the relevant `.md` file
-2. Keep formatting consistent
-3. Update this README if adding new docs
-4. Submit a pull request
 
 ## Version Info
 
 - **Project**: obsidian-control
 - **Status**: Production-ready for personal use
-- **Latest**: Commit 47b9865 (FreeCAD purged, fine-tuning complete)
 - **Python**: 3.10+
 - **Telegram Bot**: python-telegram-bot 21.11.1
 
 ---
 
 **Questions?** Start with [Setup](setup.md) or [Troubleshooting](troubleshooting.md).
-
-**Ready to fine-tune?** See [FINETUNING_SETUP.md](../FINETUNING_SETUP.md).

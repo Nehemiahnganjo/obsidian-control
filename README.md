@@ -29,6 +29,7 @@ You (Telegram) ──► Bot ──► kiro-cli (Rick agent) ──► Your mach
 
 | Doc | Description |
 |---|---|
+| [Docs Index](docs/README.md) | Overview of all guides |
 | [Architecture](docs/architecture.md) | How all the pieces connect, file layout, request lifecycle |
 | [Setup](docs/setup.md) | Full installation guide from scratch |
 | [Configuration](docs/configuration.md) | Every `.env` variable explained |
@@ -99,26 +100,6 @@ Full guide: [docs/setup.md](docs/setup.md)
 
 ---
 
-## Fine-Tuning Pipeline
-
-Train custom models locally with LoRA fine-tuning on CPU:
-
-- **Model**: Llama-3.2-1B-Uncensored (fully uncensored, 2.5GB)
-- **Framework**: LoRA (rank=8, alpha=16, 15-20MB overhead)
-- **Performance**: 30-60 min per 100 conversations, 1-2s inference
-- **Docs**: [FINE_TUNING.md](FINE_TUNING.md), [FINETUNING_SETUP.md](FINETUNING_SETUP.md), [CHECKLIST.md](CHECKLIST.md)
-
-```bash
-bash setup_finetuning.sh           # One-command setup
-python3 training_exporter.py       # Export conversations
-python3 fine_tuning/trainer.py     # Fine-tune (30-60 min)
-python3 offline_model.py           # Test inference
-```
-
-Full guide: [FINETUNING_SETUP.md](FINETUNING_SETUP.md)
-
----
-
 ## Project Layout
 
 ```
@@ -129,18 +110,6 @@ Full guide: [FINETUNING_SETUP.md](FINETUNING_SETUP.md)
     kiro-bridge.service    ← systemd service template
     .env.example           ← config template
     docs/                  ← full documentation
-
-    # Fine-tuning pipeline (NEW)
-    training_exporter.py   ← extract conversations to JSONL
-    offline_model.py       ← inference server (1-2s latency)
-    scheduler.py           ← automated training pipeline
-    setup_finetuning.sh    ← one-command setup
-    requirements-finetuning.txt ← fine-tuning dependencies
-    fine_tuning/
-        trainer.py         ← LoRA fine-tuning script
-    FINE_TUNING.md         ← complete technical guide
-    FINETUNING_SETUP.md    ← quick start guide
-    CHECKLIST.md           ← setup verification
 
 ~/obsidian_control/        ← your config (NOT in git)
     .env                   ← credentials and settings
