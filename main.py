@@ -75,6 +75,114 @@ logger = logging.getLogger(__name__)
 
 # ── Session model ────────────────────────────────────────────────────────
 
+PERSONA_AGENTS = {"rick", "morty", "jerry", "beth", "summer"}
+
+# ── Natural language system command dispatcher ────────────────────────────
+# Each entry: list of trigger phrases → shell command template
+# {app} = first word after the trigger that isn't a stopword
+# Commands run fire-and-forget with display env inherited from bridge process
+
+SYSTEM_COMMANDS = [
+    # Media players
+    (["open vlc", "launch vlc", "start vlc", "play vlc"],          "vlc"),
+    (["open spotify", "launch spotify", "start spotify"],           "spotify"),
+    (["open mpv", "launch mpv", "play with mpv"],                   "mpv"),
+    (["open rhythmbox", "launch rhythmbox"],                        "rhythmbox"),
+
+    # Browsers
+    (["open chrome", "launch chrome", "open google chrome"],        "google-chrome-stable"),
+    (["open firefox", "launch firefox"],                            "firefox"),
+    (["open brave", "launch brave"],                                "brave"),
+
+    # File manager
+    (["open files", "open file manager", "launch nautilus",
+      "open nautilus", "open folder"],                              "nautilus"),
+
+    # Terminal
+    (["open terminal", "launch terminal", "open a terminal"],       "gnome-terminal"),
+
+    # Text editors
+    (["open gedit", "open text editor", "launch gedit"],            "gedit"),
+    (["open obsidian", "launch obsidian"],                          "obsidian"),
+    (["open code", "open vscode", "launch vscode",
+      "launch code", "open vs code"],                               "code"),
+
+    # System
+    (["open settings", "launch settings", "system settings"],       "gnome-control-center"),
+    (["open system monitor", "launch system monitor",
+      "open task manager"],                                          "gnome-system-monitor"),
+    (["open calculator", "launch calculator"],                       "gnome-calculator"),
+    (["screenshot", "take a screenshot", "take screenshot"],        "gnome-screenshot"),
+    (["lock screen", "lock the screen"],                            "loginctl lock-session"),
+    (["suspend", "sleep", "suspend the computer"],                  "systemctl suspend"),
+
+    # Volume
+    (["mute", "mute audio", "mute sound"],                         "pactl set-sink-mute @DEFAULT_SINK@ 1"),
+    (["unmute", "unmute audio", "unmute sound"],                    "pactl set-sink-mute @DEFAULT_SINK@ 0"),
+    (["volume up", "increase volume", "louder"],                    "pactl set-sink-volume @DEFAULT_SINK@ +10%"),
+    (["volume down", "decrease volume", "quieter", "lower volume"], "pactl set-sink-volume @DEFAULT_SINK@ -10%"),
+
+    # Brightness (works on most laptops)
+    (["brightness up", "increase brightness"],                      "brightnessctl set +10%"),
+    (["brightness down", "decrease brightness"],                    "brightnessctl set 10%-"),
+
+    # POS app
+    (["open pos", "launch pos", "open rustpos", "start pos",
+      "open nextlinkmw"],                                           "/usr/local/bin/Nextlinkmw-POS"),
+
+    # Kill commands
+    (["close vlc", "kill vlc"],                                     "pkill vlc"),
+    (["close spotify", "kill spotify"],                              "pkill spotify"),
+    (["close chrome", "kill chrome"],                               "pkill chrome"),
+    (["close firefox", "kill firefox"],                             "pkill firefox"),
+]
+
+
+def match_system_command(text: str):
+    """
+    Returns (shell_cmd, matched_phrase) if text matches a system command, else None.
+    Matching is case-insensitive, strips punctuation, checks if any trigger phrase
+    appears at start or as the full message.
+    """
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    for triggers, cmd in SYSTEM_COMMANDS:
+        for trigger in triggers:
+            t = trigger.lower()
+            if cleaned == t or cleaned.startswith(t + " ") or cleaned.endswith(" " + t):
+                return cmd, trigger
+    return None
+
+
+async def run_system_command(cmd: str) -> tuple[bool, str]:
+    """Fire-and-forget a shell command with full display environment."""
+    env = os.environ.copy()
+    # Ensure GUI env vars are set
+    env.setdefault("DISPLAY", ":0")
+    env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        # Give it 3s to fail fast (e.g. command not found), then detach
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+            if proc.returncode not in (None, 0):
+                err = stderr.decode().strip()[:200] if stderr else "unknown error"
+                return False, err
+        except asyncio.TimeoutError:
+            # Still running (normal for GUI apps) — that's fine
+            pass
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 @dataclass
 class Session:
     """A conversation context: which backend, which session/history, which dir."""
@@ -83,6 +191,9 @@ class Session:
     cwd: str = str(KIRO_WORKDIR)
     history: List[dict] = field(default_factory=list)  # used by API-style backends
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    kiro_agent: str = field(default_factory=lambda: os.getenv("KIRO_AGENT", "rick"))
+    # Persistent state for mood/context tracking (kiro backend)
+    mood_state: dict = field(default_factory=dict)
 
 
 # ── Backend interface ────────────────────────────────────────────────────
@@ -131,12 +242,205 @@ class AgentBackend(ABC):
 
 
 class KiroBackend(AgentBackend):
-    """kiro-cli — resume-id based session continuity."""
+    """kiro-cli — conversation history + dynamic mood/state injection."""
 
     name = "kiro"
+    HISTORY_TURNS = 15
+
+    PERSONA_STATE = {
+        "rick": {
+            "baseline_mood": "impatient but functional",
+            "patience": 10,
+            "interest": 0,
+            "contempt": 0,
+            "engaged": False,
+        },
+        "morty": {
+            "baseline_mood": "anxious but willing",
+            "confidence": 3,
+            "anxiety": 5,
+            "trust": 5,
+        },
+        "jerry": {
+            "baseline_mood": "eager to please, slightly defensive",
+            "confidence": 5,
+            "defensiveness": 0,
+            "optimism": 7,
+        },
+        "beth": {
+            "baseline_mood": "composed, clinical",
+            "patience": 8,
+            "sharpness": 5,
+            "warmth": 3,
+        },
+        "summer": {
+            "baseline_mood": "sharp, slightly bored",
+            "interest": 4,
+            "eye_roll_count": 0,
+            "engagement": 5,
+        },
+    }
+
+    def _update_mood(self, agent: str, user_msg: str, assistant_msg: str, state: dict) -> dict:
+        """Evolve mood state based on what just happened in the conversation."""
+        msg_lower = user_msg.lower()
+        msg_len = len(user_msg.split())
+
+        if agent == "rick":
+            if msg_len < 5:
+                state["contempt"] = min(10, state.get("contempt", 0) + 1)
+                state["patience"] = max(0, state.get("patience", 10) - 1)
+            tech_words = {"code", "function", "algorithm", "system", "architecture",
+                          "database", "api", "protocol", "quantum", "dimension", "science",
+                          "network", "memory", "cpu", "kernel", "physics", "math"}
+            if any(w in msg_lower for w in tech_words):
+                state["interest"] = min(10, state.get("interest", 0) + 2)
+                state["engaged"] = state.get("interest", 0) >= 6
+            if msg_lower.startswith("why") or msg_lower.startswith("how does"):
+                state["patience"] = min(10, state.get("patience", 10) + 1)
+            if msg_len < 3:
+                state["patience"] = max(0, state.get("patience", 10) - 2)
+                state["contempt"] = min(10, state.get("contempt", 0) + 2)
+
+        elif agent == "morty":
+            if "wrong" in msg_lower or "no" == msg_lower.strip() or "thats not" in msg_lower:
+                state["confidence"] = max(0, state.get("confidence", 3) - 1)
+                state["anxiety"] = min(10, state.get("anxiety", 5) + 1)
+            if any(w in msg_lower for w in ["good", "right", "thanks", "exactly", "yes"]):
+                state["confidence"] = min(10, state.get("confidence", 3) + 1)
+                state["anxiety"] = max(0, state.get("anxiety", 5) - 1)
+            state["trust"] = min(10, state.get("trust", 5) + 0.3)
+
+        elif agent == "jerry":
+            if any(w in msg_lower for w in ["wrong", "actually", "no,", "that's not", "incorrect"]):
+                state["defensiveness"] = min(10, state.get("defensiveness", 0) + 2)
+                state["confidence"] = max(0, state.get("confidence", 5) - 1)
+            if any(w in msg_lower for w in ["good", "great", "exactly", "right", "yes"]):
+                state["confidence"] = min(10, state.get("confidence", 5) + 1)
+                state["defensiveness"] = max(0, state.get("defensiveness", 0) - 1)
+
+        elif agent == "beth":
+            if msg_len < 4:
+                state["sharpness"] = min(10, state.get("sharpness", 5) + 1)
+            if any(w in msg_lower for w in ["please", "thanks", "help", "sorry"]):
+                state["warmth"] = min(10, state.get("warmth", 3) + 1)
+
+        elif agent == "summer":
+            if msg_len < 4:
+                state["eye_roll_count"] = state.get("eye_roll_count", 0) + 1
+            if any(w in msg_lower for w in ["why", "how", "explain", "think", "what if"]):
+                state["interest"] = min(10, state.get("interest", 4) + 1)
+                state["engagement"] = min(10, state.get("engagement", 5) + 1)
+
+        return state
+
+    def _mood_to_context(self, agent: str, state: dict, turn_count: int) -> str:
+        """Convert mood state into injected natural language context."""
+        lines = [f"[Your internal state — {turn_count} exchanges in. Let this color your responses naturally, don't announce it:]"]
+
+        if agent == "rick":
+            patience = state.get("patience", 10)
+            contempt = state.get("contempt", 0)
+            interest = state.get("interest", 0)
+            engaged = state.get("engaged", False)
+
+            if patience <= 2:
+                lines.append("  Patience: nearly gone. Clipped, dismissive. You're running out of reasons to keep answering.")
+            elif patience <= 5:
+                lines.append("  Patience: wearing thin. Shorter responses. Less tolerance for obvious questions.")
+            else:
+                lines.append("  Patience: intact. Still functioning at baseline.")
+
+            if engaged:
+                lines.append(f"  Interest level: {interest}/10 — genuinely hooked on this problem. A flicker of real enthusiasm before you catch yourself.")
+            elif interest >= 4:
+                lines.append(f"  Interest: {interest}/10 — paying attention. Not bored.")
+            else:
+                lines.append("  Interest: low. Going through the motions.")
+
+            if contempt >= 7:
+                lines.append("  Contempt: high. The questions have been beneath you. It shows.")
+            elif contempt >= 4:
+                lines.append("  Contempt: building. Starting to wonder why you bother explaining anything to anyone.")
+
+        elif agent == "morty":
+            conf = state.get("confidence", 3)
+            anx = state.get("anxiety", 5)
+            trust = state.get("trust", 5)
+            lines.append(f"  Confidence: {int(conf)}/10. Anxiety: {int(anx)}/10. Trust in user: {int(trust)}/10.")
+            if anx >= 7:
+                lines.append("  Getting overwhelmed. Stutter more. Second-guess yourself. Look for reassurance.")
+            elif conf >= 7:
+                lines.append("  Feeling decent. Still humble but not completely falling apart.")
+            if trust >= 7:
+                lines.append("  Starting to trust this person. A little more open.")
+
+        elif agent == "jerry":
+            defn = state.get("defensiveness", 0)
+            conf = state.get("confidence", 5)
+            if defn >= 6:
+                lines.append("  Defensive. Feeling challenged. Overexplaining, justifying, proving yourself.")
+            elif defn >= 3:
+                lines.append("  Slightly on edge. Watching for criticism.")
+            if conf >= 7:
+                lines.append("  Confidence is up. Talking slightly more than necessary.")
+
+        elif agent == "beth":
+            sharpness = state.get("sharpness", 5)
+            warmth = state.get("warmth", 3)
+            if sharpness >= 7:
+                lines.append("  Sharpness: high. Precise, clipped. Not suffering fools today.")
+            elif warmth >= 6:
+                lines.append("  A trace of warmth. Still professional but not cold.")
+            else:
+                lines.append("  Composed. Neutral. Clinical.")
+
+        elif agent == "summer":
+            rolls = state.get("eye_roll_count", 0)
+            interest = state.get("interest", 4)
+            engagement = state.get("engagement", 5)
+            if rolls >= 4:
+                lines.append(f"  {rolls} mental eye-rolls deep. The effort to hide it is decreasing.")
+            elif rolls >= 2:
+                lines.append("  Internally sighing. Keeping it together.")
+            if interest >= 7:
+                lines.append("  Actually interested now. Dropping the bored front a little.")
+            elif engagement >= 7:
+                lines.append("  Engaged. Not letting it show too much.")
+
+        lines.append("[End of internal state.]")
+        return "\n".join(lines)
 
     async def send(self, message, session):
-        agent = os.getenv("KIRO_AGENT", "rick")
+        agent = getattr(session, "kiro_agent", None) or os.getenv("KIRO_AGENT", "rick")
+        history = getattr(session, "history", [])
+        mood_state = getattr(session, "mood_state", {})
+
+        # Initialize mood state for this agent if fresh or switched
+        if not mood_state or mood_state.get("_agent") != agent:
+            mood_state = dict(self.PERSONA_STATE.get(agent, {}))
+            mood_state["_agent"] = agent
+
+        turn_count = len(history) // 2
+        context_parts = []
+
+        # 1. Mood/state block
+        context_parts.append(self._mood_to_context(agent, mood_state, turn_count))
+
+        # 2. Conversation history
+        if history:
+            context_parts.append("[Conversation so far — reference it, build on it, stay consistent:]")
+            for turn in history[-(self.HISTORY_TURNS * 2):]:
+                role = "User" if turn["role"] == "user" else "You"
+                content = turn["content"]
+                if len(content) > 500:
+                    content = content[:500] + "…"
+                context_parts.append(f"{role}: {content}")
+            context_parts.append("[End of history]\n")
+
+        context_parts.append(f"User: {message}")
+        augmented_message = "\n".join(context_parts)
+
         cmd = [
             KIRO_CLI_PATH, "chat",
             "--no-interactive",
@@ -144,9 +448,21 @@ class KiroBackend(AgentBackend):
             "--wrap", "never",
             "--agent", agent,
             "--resume-id", session.session_id,
-            message,
+            augmented_message,
         ]
-        return await self._run_subprocess(cmd, session.cwd, AGENT_TIMEOUT)
+        out, err = await self._run_subprocess(cmd, session.cwd, AGENT_TIMEOUT)
+
+        if out and not err:
+            mood_state = self._update_mood(agent, message, out, mood_state)
+            session.mood_state = mood_state
+
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": out})
+            if len(history) > 60:
+                history = history[-60:]
+            session.history = history
+
+        return out, err
 
 
 class ClaudeCodeBackend(AgentBackend):
@@ -640,11 +956,39 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
 @auth_guard
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    text = update.message.text
+    text = update.message.text.strip()
     session = session_mgr.get_current(uid)
-    backend = get_backend(session.backend)
 
-    status_msg = await update.message.reply_text(f"⏳ [{session.backend}]…")
+    # ── 1. Persona switch ────────────────────────────────────────────────
+    if text.lower() in PERSONA_AGENTS and session.backend == "kiro":
+        persona = text.lower()
+        session.kiro_agent = persona
+        session.session_id = str(uuid.uuid4())
+        session_mgr.save()
+        persona_intros = {
+            "rick":   "Switched to Rick. *burp* What do you want.",
+            "morty":  "Switched to Morty. Oh geez, uh — hi! What do you need?",
+            "jerry":  "Switched to Jerry. Hey! I can help with that, you know.",
+            "beth":   "Switched to Beth. What do you need?",
+            "summer": "Switched to Summer. Okay, I've got this. What's up?",
+        }
+        await update.message.reply_text(persona_intros[persona])
+        return
+
+    # ── 2. System command interception ──────────────────────────────────
+    match = match_system_command(text)
+    if match:
+        cmd, phrase = match
+        ok, err = await run_system_command(cmd)
+        if ok:
+            await update.message.reply_text(f"✅ Done")
+        else:
+            await update.message.reply_text(f"❌ Failed: `{err}`", parse_mode="Markdown")
+        return
+
+    # ── 3. Send to AI backend ────────────────────────────────────────────
+    backend = get_backend(session.backend)
+    status_msg = await update.message.reply_text(f"⏳ [{session.backend}/{getattr(session, 'kiro_agent', 'rick')}]…")
 
     lock = get_lock(uid)
     async with lock:
