@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-kiro-telegram-bridge — Multi-backend version
+kiro-telegram-bridge — Multi-backend version with cross-session learning
 Supports kiro-cli, Claude Code CLI, Anthropic API, Ollama, or any custom CLI agent.
 Switch backends per-session via /backend command or AGENT_BACKEND env var.
+Learns user preferences via semantic memory consolidation job.
 """
 
 import asyncio
@@ -29,6 +30,10 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+# Import learning components
+from semantic_memory import SemanticMemory
+from consolidation import ConsolidationJob
 
 load_dotenv()
 
@@ -61,6 +66,7 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 LOG_FILE = os.getenv("LOG_FILE", str(BRIDGE_DIR / "bridge.log"))
 SESSION_STATE_FILE = BRIDGE_DIR / "session_state.json"
+SEMANTIC_MEMORY_FILE = BRIDGE_DIR / "semantic_memory.json"
 
 BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
 KIRO_WORKDIR.mkdir(parents=True, exist_ok=True)
@@ -71,6 +77,10 @@ logging.basicConfig(
     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+
+# ── Learning infrastructure ──────────────────────────────────────────────────
+semantic_memory = SemanticMemory(SEMANTIC_MEMORY_FILE)
+consolidation_job = ConsolidationJob(SESSION_STATE_FILE, semantic_memory)
 
 
 # ── Session model ────────────────────────────────────────────────────────
@@ -1168,6 +1178,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Entry point ──────────────────────────────────────────────────────────
 
+
+@auth_guard
+async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/learn — trigger semantic memory consolidation from recent conversations"""
+    uid = update.effective_user.id
+    try:
+        consolidation_job.run(min_turns=3)
+        facts = semantic_memory.get_all_active()
+        await update.message.reply_text(
+            f"✅ Consolidation complete\n"
+            f"Extracted facts: {len(facts)}\n"
+            f"Active facts in memory: {len(semantic_memory.facts)}",
+            parse_mode="Markdown"
+        )
+        logger.info(f"Consolidation triggered by {uid}: {len(facts)} facts extracted")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)[:200]}", parse_mode="Markdown")
+        logger.error(f"Consolidation failed: {e}")
+
+
+
 def main():
     # Python 3.10+ no longer creates an implicit event loop; PTB 21.x needs one
     # to exist on the main thread before run_polling() is called.
@@ -1181,6 +1212,7 @@ def main():
     app.add_handler(CommandHandler("new", new_session_cmd))
     app.add_handler(CommandHandler("backend", backend_command))
     app.add_handler(CommandHandler("files", list_files_command))
+    app.add_handler(CommandHandler("learn", learn_command))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file_upload))
