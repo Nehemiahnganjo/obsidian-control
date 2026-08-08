@@ -281,10 +281,49 @@ class KiroBackend(AgentBackend):
         },
     }
 
+    # Decay rates: applied each turn to simulate natural mood evolution (Ebbinghaus curve)
+    # Negative = decay (fades), Positive = recovery (bounces back)
+    DECAY_RATES = {
+        "rick": {
+            "contempt": -0.1,       # contempt fades slowly if no trigger
+            "patience": +0.08,      # patience recovers between turns
+            "interest": -0.12,      # interest fades if no technical stimulus
+        },
+        "morty": {
+            "anxiety": -0.15,       # anxiety recovers quickly with reassurance
+            "confidence": -0.03,    # confidence fades slowly if not reinforced
+        },
+        "jerry": {
+            "defensiveness": -0.12, # defensiveness fades over time
+            "confidence": +0.02,    # confidence slowly rebuilds
+        },
+        "beth": {
+            "sharpness": -0.08,     # sharpness mellows slightly
+            "warmth": +0.03,        # warmth accumulates over time
+        },
+        "summer": {
+            "eye_roll_count": -0.05,    # eye-rolls fade (as int, applied then rounded)
+            "interest": -0.1,           # interest fades without engagement
+            "engagement": -0.08,        # engagement decays
+        },
+    }
+
     def _update_mood(self, agent: str, user_msg: str, assistant_msg: str, state: dict) -> dict:
         """Evolve mood state based on what just happened in the conversation."""
         msg_lower = user_msg.lower()
         msg_len = len(user_msg.split())
+
+        # Apply natural decay first (Ebbinghaus forgetting curve)
+        # This makes mood gradually return to baseline between turns
+        decay_rates = self.DECAY_RATES.get(agent, {})
+        for key, decay_amount in decay_rates.items():
+            if key in state and isinstance(state[key], (int, float)):
+                # Clamp to 0-10 range (except eye_roll_count which is unbounded)
+                old_val = state[key]
+                new_val = old_val + decay_amount
+                if key != "eye_roll_count":
+                    new_val = max(0, min(10, new_val))
+                state[key] = new_val
 
         if agent == "rick":
             if msg_len < 5:
@@ -427,19 +466,51 @@ class KiroBackend(AgentBackend):
         # 1. Mood/state block
         context_parts.append(self._mood_to_context(agent, mood_state, turn_count))
 
-        # 2. Conversation history
+        # 2. Conversation history with context window monitoring
         if history:
             context_parts.append("[Conversation so far — reference it, build on it, stay consistent:]")
-            for turn in history[-(self.HISTORY_TURNS * 2):]:
+            # Start with full HISTORY_TURNS window; compress if augmented message gets too large
+            history_window_size = self.HISTORY_TURNS * 2
+            
+            for turn in history[-history_window_size:]:
                 role = "User" if turn["role"] == "user" else "You"
                 content = turn["content"]
                 if len(content) > 500:
                     content = content[:500] + "…"
                 context_parts.append(f"{role}: {content}")
+            
             context_parts.append("[End of history]\n")
 
         context_parts.append(f"User: {message}")
         augmented_message = "\n".join(context_parts)
+
+        # Monitor context window: if augmented message is too large, compress history
+        # Rough estimate: ~4-5 chars per token
+        CONTEXT_LIMIT_TOKENS = 6000
+        estimated_tokens = len(augmented_message) // 4
+        
+        if estimated_tokens > CONTEXT_LIMIT_TOKENS and len(history) > 4:
+            # Compress: drop oldest half of history, keep most recent turns only
+            logger.info(f"Context window approaching limit ({estimated_tokens} tokens). Compressing history.")
+            recent_turns = len(history) // 2  # Keep only the most recent exchanges
+            history_summary = f"[Earlier in conversation: {recent_turns} exchanges occurred. Current focus is on recent context.]"
+            
+            # Rebuild without oldest turns
+            context_parts = []
+            context_parts.append(self._mood_to_context(agent, mood_state, turn_count))
+            context_parts.append("[Conversation — most recent context:]")
+            context_parts.append(history_summary)
+            
+            for turn in history[-(self.HISTORY_TURNS):]:  # Keep only HISTORY_TURNS most recent
+                role = "User" if turn["role"] == "user" else "You"
+                content = turn["content"]
+                if len(content) > 300:  # Even shorter after compression
+                    content = content[:300] + "…"
+                context_parts.append(f"{role}: {content}")
+            
+            context_parts.append("[End of history]\n")
+            context_parts.append(f"User: {message}")
+            augmented_message = "\n".join(context_parts)
 
         cmd = [
             KIRO_CLI_PATH, "chat",
