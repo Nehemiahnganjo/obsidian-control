@@ -1,0 +1,31 @@
+# Fine-tuning requirements (in addition to base requirements)
+# CPU-optimized for Intel i5 + 32GB RAM
+
+# Core transformers stack
+transformers==4.37.2
+torch==2.2.0+cpu  # CPU-optimized PyTorch
+torchvision==0.17.0+cpu
+torchaudio==2.2.0+cpu
+
+# Fine-tuning frameworks
+peft==0.7.1  # Parameter-Efficient Fine-Tuning (LoRA)
+datasets==2.16.0  # Hugging Face datasets
+accelerate==0.26.1  # Multi-GPU/distributed training utilities
+
+# Optimization
+bitsandbytes==0.42.0  # Optional: for quantization during training
+optimum==1.17.1  # Optimization for inference
+
+# Utilities
+huggingface-hub==0.20.1  # Model downloading
+tqdm==4.66.1  # Progress bars
+pandas==2.1.4  # Data manipulation
+numpy==1.24.3  # Numerical computing
+
+# Monitoring & logging
+tensorboard==2.15.1  # Training metrics
+wandb==0.16.1  # Experiment tracking (optional)
+
+# Development
+jupyter==1.0.0  # Notebooks for experimentation
+ipython==8.19.0
