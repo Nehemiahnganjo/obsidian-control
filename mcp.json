@@ -50,16 +50,6 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
       "description": "Structured step-by-step reasoning for complex problems"
-    },
-    "freecad": {
-      "command": "/home/void/obsidian_control/freecad_mcp_launcher.sh",
-      "env": {
-        "FREECAD_MODE": "xmlrpc",
-        "FREECAD_XMLRPC_PORT": "9875",
-        "FREECAD_SOCKET_HOST": "localhost",
-        "FREECAD_TIMEOUT_MS": "60000"
-      },
-      "description": "FreeCAD — create 3D CAD models, BIM architecture, house plans. Auto-starts FreeCAD headless bridge."
     }
   }
 }
