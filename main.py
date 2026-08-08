@@ -1040,7 +1040,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     session = session_mgr.get_current(uid)
 
-    # ── 1. Persona switch ────────────────────────────────────────────────
+    # ── 0. Validate input ──────────────────────────────────────────────────
+    ok, err = validate_message(text)
+    if not ok:
+        await update.message.reply_text(f"❌ {err}")
+        logger.warning(f"Invalid message from {uid}: {err}")
+        return
+
+    # ── 1. Rate limit check ────────────────────────────────────────────────
+    allowed, wait_time = rate_limiter.check_and_record(uid)
+    if not allowed:
+        await update.message.reply_text(f"⏳ Rate limited. Please wait {wait_time:.1f}s")
+        logger.info(f"Rate limit: user {uid} exceeded limit")
+        return
+
+    # ── 2. Persona switch ──────────────────────────────────────────────────
     if text.lower() in PERSONA_AGENTS and session.backend == "kiro":
         persona = text.lower()
         session.kiro_agent = persona
@@ -1056,7 +1070,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(persona_intros[persona])
         return
 
-    # ── 2. System command interception ──────────────────────────────────
+    # ── 3. System command interception ──────────────────────────────────
     match = match_system_command(text)
     if match:
         cmd, phrase = match
@@ -1067,18 +1081,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Failed: `{err}`", parse_mode="Markdown")
         return
 
-    # ── 3. Send to AI backend ────────────────────────────────────────────
+    # ── 4. Send to AI backend ──────────────────────────────────────────────
     backend = get_backend(session.backend)
     status_msg = await update.message.reply_text(f"⏳ [{session.backend}/{getattr(session, 'kiro_agent', 'rick')}]…")
 
     lock = get_lock(uid)
     async with lock:
+        import time
+        start_time = time.time()
         output, error = await backend.send(text, session)
+        response_time = time.time() - start_time
+        
+        # Record metrics
+        metrics_collector.record_backend_call(
+            session.backend,
+            response_time,
+            error
+        )
+        
         session.updated_at = datetime.now().isoformat()
         session_mgr.save()
 
     if error:
         await status_msg.edit_text(f"❌ [{session.backend}] Error:\n```\n{error}\n```", parse_mode="Markdown")
+        logger.error(f"Backend error [{session.backend}]: {error}")
         return
 
     output = filter_response(output)
@@ -1090,6 +1116,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.edit_text(chunks[0])
     for chunk in chunks[1:]:
         await update.message.reply_text(chunk)
+    
+    logger.info(f"Message from {uid} via {session.backend}: {response_time:.2f}s")
 
 
 @auth_guard
@@ -1198,6 +1226,177 @@ async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Consolidation failed: {e}")
 
 
+# ── Debug & Monitoring Commands ──────────────────────────────────────────────
+
+@auth_guard
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/debug — Show backend debug info and health."""
+    uid = update.effective_user.id
+    session = session_mgr.get_current(uid)
+    backend = BACKENDS.get(session.backend)
+    
+    if not backend:
+        await update.message.reply_text("❌ Backend not found")
+        return
+    
+    debug_info = [
+        "🔧 **DEBUG INFO**",
+        "",
+        f"**Backend**: {backend.name}",
+        f"**Session ID**: `{session.session_id}`",
+        f"**Working Dir**: `{session.cwd}`",
+        f"**History Length**: {len(session.history)}",
+        f"**Mood State**: {'✅' if getattr(session, 'mood_state', {}) else '❌'}",
+    ]
+    
+    if backend.name == "kiro":
+        agent = getattr(session, 'kiro_agent', 'rick')
+        mood = getattr(session, 'mood_state', {})
+        debug_info.extend([
+            f"**Kiro Agent**: {agent}",
+            f"**Mood Keys**: {', '.join(list(mood.keys())[:5])}…" if mood else "**Mood Keys**: none",
+        ])
+    elif backend.name == "anthropic_api":
+        debug_info.append(f"**Messages in History**: {len(session.history)}")
+    elif backend.name == "openai":
+        debug_info.extend([
+            f"**Messages in History**: {len(session.history)}",
+            f"**Base URL Configured**: {'✅' if OPENAI_API_KEY else '❌'}",
+        ])
+    elif backend.name == "ollama":
+        debug_info.extend([
+            f"**Messages in History**: {len(session.history)}",
+            f"**Host**: `{OLLAMA_HOST}`",
+        ])
+    
+    text = "\n".join(debug_info)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+@auth_guard
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/stats — Show usage statistics."""
+    uid = update.effective_user.id
+    all_sessions = session_mgr.list_for(uid)
+    
+    backend_stats = {}
+    total_messages = 0
+    
+    for session_name, session in all_sessions.items():
+        backend_name = session.backend
+        history_len = len(session.history) // 2
+        
+        if backend_name not in backend_stats:
+            backend_stats[backend_name] = 0
+        backend_stats[backend_name] += history_len
+        total_messages += history_len
+    
+    lines = [
+        "📊 **STATISTICS**",
+        "",
+        f"**Total Sessions**: {len(all_sessions)}",
+        f"**Total Messages**: {total_messages}",
+        "",
+        "**By Backend**:",
+    ]
+    
+    for backend_name in sorted(BACKENDS.keys()):
+        count = backend_stats.get(backend_name, 0)
+        icon = "✓" if count > 0 else "○"
+        lines.append(f"  {icon} `{backend_name}`: {count} messages")
+    
+    text = "\n".join(lines)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+@auth_guard
+async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/health — Check bridge and backend health."""
+    uid = update.effective_user.id
+    
+    health_checks = {}
+    for backend_name, backend in BACKENDS.items():
+        is_healthy = hasattr(backend, 'send') and callable(backend.send)
+        health_checks[backend_name] = "✅" if is_healthy else "❌"
+    
+    metrics_summary = metrics_collector.get_summary()
+    
+    lines = [
+        "🏥 **HEALTH CHECK**",
+        "",
+        f"**Uptime**: {metrics_summary['uptime']}",
+        f"**Total Messages**: {metrics_summary['total_messages']}",
+        f"**Total Errors**: {metrics_summary['total_errors']}",
+        "",
+        "**Backends**:",
+    ]
+    
+    for backend_name, status in sorted(health_checks.items()):
+        lines.append(f"  {status} `{backend_name}`")
+    
+    text = "\n".join(lines)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+@auth_guard
+async def replay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/replay [limit] — Show recent conversation history."""
+    uid = update.effective_user.id
+    session = session_mgr.get_current(uid)
+    
+    limit = 10
+    if context.args:
+        try:
+            limit = int(context.args[0])
+        except (ValueError, IndexError):
+            pass
+    
+    if not session.history:
+        await update.message.reply_text("No conversation history")
+        return
+    
+    history = session.history[-(limit * 2):]
+    
+    lines = ["📜 **CONVERSATION**", ""]
+    for msg in history:
+        role = "👤" if msg["role"] == "user" else "🤖"
+        content = msg["content"]
+        if len(content) > 200:
+            content = content[:200] + "…"
+        lines.append(f"{role} {content}")
+    
+    text = "\n".join(lines)
+    
+    if len(text) > 4096:
+        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+
+@auth_guard
+async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/config — Show current configuration."""
+    uid = update.effective_user.id
+    
+    lines = [
+        "⚙️ **CONFIGURATION**",
+        "",
+        f"**Default Backend**: `{DEFAULT_BACKEND}`",
+        f"**Agent Timeout**: `{AGENT_TIMEOUT}s`",
+        f"**Response Mode**: `{RESPONSE_MODE}`",
+        f"**Max File Size**: `{format_size(MAX_FILE_SIZE)}`",
+        "",
+        "**Paths**:",
+        f"  Kiro CLI: `{KIRO_CLI_PATH}`",
+        f"  Claude Code: `{CLAUDE_CODE_PATH}`",
+        f"  Aider: `{AIDER_PATH}`",
+    ]
+    
+    text = "\n".join(lines)
+    await update.message.reply_text(text, parse_mode="Markdown")
+
 
 def main():
     # Python 3.10+ no longer creates an implicit event loop; PTB 21.x needs one
@@ -1213,6 +1412,13 @@ def main():
     app.add_handler(CommandHandler("backend", backend_command))
     app.add_handler(CommandHandler("files", list_files_command))
     app.add_handler(CommandHandler("learn", learn_command))
+    
+    # Debug & monitoring commands
+    app.add_handler(CommandHandler("debug", debug_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("health", health_command))
+    app.add_handler(CommandHandler("replay", replay_command))
+    app.add_handler(CommandHandler("config", config_command))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file_upload))
