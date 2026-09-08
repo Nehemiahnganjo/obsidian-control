@@ -1,3 +1,4 @@
+
 # obsidian-control
 
 > Your terminal, in your pocket.
@@ -155,3 +156,15 @@ No pressure. But appreciated.
 
 MIT — free to use, modify, and distribute. See [LICENSE](LICENSE).
 
+---
+
+<div align="center">
+
+**☕ If something I built saved you time or money — a tip is appreciated. No pressure.**
+
+[![$1 — Coffee](https://img.shields.io/badge/☕_$1-Coffee-0070ba?style=flat-square&logo=paypal&logoColor=white)](https://paypal.me/Nextlinkmw/1)
+[![$5 — Lunch](https://img.shields.io/badge/🍔_$5-Lunch-0070ba?style=flat-square&logo=paypal&logoColor=white)](https://paypal.me/Nextlinkmw/5)
+[![$10 — Fuel](https://img.shields.io/badge/⚡_$10-Fuel-0070ba?style=flat-square&logo=paypal&logoColor=white)](https://paypal.me/Nextlinkmw/10)
+[![$20 — You are the GOAT](https://img.shields.io/badge/🐐_$20-You_are_the_GOAT-0070ba?style=flat-square&logo=paypal&logoColor=white)](https://paypal.me/Nextlinkmw/20)
+
+</div>
